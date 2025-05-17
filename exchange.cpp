@@ -28,7 +28,8 @@ public:
     // Delete copy and move constructors/assignments
     Seller(const Seller &) = delete;
     Seller &operator=(const Seller &) = delete;
-    Seller(Seller &&) = delete;
+    //
+    // Seller(Seller &&) = delete;
     Seller &operator=(Seller &&) = delete;
 
     // Sell logic (thread-safe)
