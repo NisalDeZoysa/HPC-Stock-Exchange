@@ -1,4 +1,4 @@
-#include <iostream>
+
 #include <vector>
 #include <omp.h>
 #include <algorithm>
@@ -8,7 +8,18 @@
 #include <iostream>
 #include <string>
 #include <cstdlib>
+#include <iostream>
+#include <vector>
+#include <omp.h>
+#include <algorithm>
+#include <thread>
+#include <chrono>
+#include <cstring>
+#include <iostream>
+#include <string>
 #include <sstream>
+
+#include <cstdlib> // for rand
 
 enum FlowerType
 {
