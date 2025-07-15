@@ -219,7 +219,7 @@ public:
 
     void initializeMarket()
     {
-        std::cout << "🔧 Initializing market with " << omp_get_max_threads() << " threads available\n";
+        std::cout << "Initializing market with " << omp_get_max_threads() << " threads available\n";
 
         // Initialize sellers
         sellers.resize(5);
@@ -294,7 +294,7 @@ public:
         std::cout << "Concurrent Trades: " << concurrent_trades.load() << "\n";
         std::cout << std::string(70, '=') << "\n";
 
-        std::cout << "\n📦 SELLER INVENTORY:\n";
+        std::cout << "\n SELLER INVENTORY:\n";
 
         // Parallel aggregation of seller statistics
         std::vector<double> seller_revenues(sellers.size());
@@ -309,7 +309,7 @@ public:
 
         for (int i = 0; i < sellers.size(); ++i)
         {
-            std::cout << "🏪 " << sellers[i].name << " (Revenue: $" << std::fixed
+            std::cout << " " << sellers[i].name << " (Revenue: $" << std::fixed
                       << std::setprecision(2) << seller_revenues[i]
                       << ", Trades: " << seller_trade_counts[i] << ")\n";
 
@@ -321,7 +321,7 @@ public:
             }
         }
 
-        std::cout << "\n🛒 BUYER DEMANDS:\n";
+        std::cout << "\n BUYER DEMANDS:\n";
 
         // Parallel aggregation of buyer statistics
         std::vector<double> buyer_spent(buyers.size());
@@ -336,7 +336,7 @@ public:
 
         for (int i = 0; i < buyers.size(); ++i)
         {
-            std::cout << "👤 " << buyers[i].name << " (Priority: " << buyers[i].priority
+            std::cout << " " << buyers[i].name << " (Priority: " << buyers[i].priority
                       << ", Spent: $" << std::fixed << std::setprecision(2) << buyer_spent[i]
                       << ", Purchases: " << buyer_purchases[i] << ")\n";
 
@@ -379,7 +379,7 @@ public:
         std::atomic<bool> any_trade(false);
         parallel_operations.fetch_add(1);
 
-        std::cout << "🔄 Conducting parallel trading round on " << omp_get_max_threads() << " threads\n";
+        std::cout << " Conducting parallel trading round on " << omp_get_max_threads() << " threads\n";
 
         // Sort buyers by priority (higher priority first) - parallel sort
         std::vector<int> buyer_indices(buyers.size());
@@ -536,7 +536,7 @@ public:
         // Print trade info with thread information
         {
             std::lock_guard<std::mutex> lock(print_mutex);
-            std::cout << "💰 [T" << omp_get_thread_num() << "] " << buyer.name
+            std::cout << " [T" << omp_get_thread_num() << "] " << buyer.name
                       << " bought " << actual_quantity << " " << FlowerNames[flower]
                       << "(s) from " << seller.name << " for $" << std::fixed
                       << std::setprecision(2) << cost << " ($" << seller.price[flower] << " each)\n";
@@ -550,7 +550,7 @@ public:
 
     void dropPrices()
     {
-        std::cout << "📉 Parallel price adjustment across all sellers...\n";
+        std::cout << "Parallel price adjustment across all sellers...\n";
 
 #pragma omp parallel for collapse(2)
         for (int i = 0; i < sellers.size(); ++i)
@@ -572,7 +572,7 @@ public:
         bool market_open = true;
         int round = 0;
 
-        std::cout << "🌸 PARALLEL FLOWER MARKET OPENING 🌸\n";
+        std::cout << " PARALLEL FLOWER MARKET OPENING \n";
         std::cout << "Market has " << sellers.size() << " sellers and " << buyers.size() << " buyers\n";
         std::cout << "Running on " << omp_get_max_threads() << " threads\n";
 
@@ -598,14 +598,14 @@ public:
 
             if (allDemandsFulfilled())
             {
-                std::cout << "✅ All buyers' demands fulfilled! Market closing.\n";
+                std::cout << " All buyers' demands fulfilled! Market closing.\n";
                 market_open = false;
             }
 
             // Enhanced exit condition
             if (round > 30)
             {
-                std::cout << "⏰ Market timeout after 30 rounds.\n";
+                std::cout << " Market timeout after 30 rounds.\n";
                 market_open = false;
             }
 
@@ -617,7 +617,7 @@ public:
 
     void analyzeMarketConditions()
     {
-        std::cout << "🔍 Parallel market analysis...\n";
+        std::cout << " Parallel market analysis...\n";
 
         // Parallel calculation of market metrics
         std::vector<double> avg_prices(3, 0.0);
@@ -653,7 +653,7 @@ public:
         }
 
         // Print analysis
-        std::cout << "📊 Market Conditions:\n";
+        std::cout << " Market Conditions:\n";
         for (int i = 0; i < 3; ++i)
         {
             std::cout << "   " << FlowerNames[i] << ": Avg Price $" << std::fixed
@@ -671,12 +671,12 @@ public:
 
         printStatus();
 
-        std::cout << "\n📊 PARALLEL PROCESSING STATISTICS:\n";
+        std::cout << "\n PARALLEL PROCESSING STATISTICS:\n";
         std::cout << "Total Parallel Operations: " << parallel_operations.load() << "\n";
         std::cout << "Peak Concurrent Trades: " << concurrent_trades.load() << "\n";
         std::cout << "Threads Used: " << omp_get_max_threads() << "\n";
 
-        std::cout << "\n💰 TRADE SUMMARY:\n";
+        std::cout << "\n TRADE SUMMARY:\n";
         std::cout << "Total Trades: " << total_trades.load() << "\n";
         std::cout << "Total Market Volume: $" << std::fixed << std::setprecision(2) << total_volume.load() << "\n";
 
@@ -710,7 +710,7 @@ public:
             buyer_efficiency[i] = total_original > 0 ? (double)total_bought / total_original * 100 : 0.0;
         }
 
-        std::cout << "\n📈 PARALLEL EFFICIENCY ANALYSIS:\n";
+        std::cout << "\n PARALLEL EFFICIENCY ANALYSIS:\n";
         std::cout << "Seller Performance:\n";
         for (int i = 0; i < sellers.size(); ++i)
         {
@@ -739,7 +739,7 @@ public:
 
     void printMarketSummary()
     {
-        std::cout << "\n🌺 PARALLEL MARKET SUMMARY 🌺\n";
+        std::cout << "\n PARALLEL MARKET SUMMARY \n";
         std::cout << "OpenMP Threads: " << omp_get_max_threads() << "\n";
         std::cout << "Sellers: " << sellers.size() << "\n";
         std::cout << "Buyers: " << buyers.size() << "\n";
@@ -796,7 +796,7 @@ int main()
     // Set OpenMP thread count
     omp_set_num_threads(std::min(8, omp_get_max_threads()));
 
-    std::cout << "🚀 Starting Parallel Flower Market Exchange\n";
+    std::cout << " Starting Parallel Flower Market Exchange\n";
     std::cout << "Available CPU cores: " << omp_get_max_threads() << "\n";
     std::cout << "Using " << omp_get_num_threads() << " threads\n";
 
