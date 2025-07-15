@@ -76,6 +76,16 @@ struct Seller
         }
         return *this;
     }
+
+    // Helper method to add revenue atomically
+    void addRevenue(double amount)
+    {
+        double expected = revenue.load();
+        while (!revenue.compare_exchange_weak(expected, expected + amount))
+        {
+            // Keep trying until successful
+        }
+    }
 };
 
 struct Buyer
@@ -140,6 +150,30 @@ struct Buyer
         }
         return *this;
     }
+
+    // Helper method to subtract from budget atomically
+    bool subtractBudget(double amount)
+    {
+        double expected = budget.load();
+        while (expected >= amount)
+        {
+            if (budget.compare_exchange_weak(expected, expected - amount))
+            {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    // Helper method to add to spent atomically
+    void addSpent(double amount)
+    {
+        double expected = spent.load();
+        while (!spent.compare_exchange_weak(expected, expected + amount))
+        {
+            // Keep trying until successful
+        }
+    }
 };
 
 struct TradeRecord
@@ -169,6 +203,16 @@ private:
     // Parallel processing statistics
     std::atomic<int> parallel_operations;
     std::atomic<int> concurrent_trades;
+
+    // Helper method to add to total volume atomically
+    void addToTotalVolume(double amount)
+    {
+        double expected = total_volume.load();
+        while (!total_volume.compare_exchange_weak(expected, expected + amount))
+        {
+            // Keep trying until successful
+        }
+    }
 
 public:
     FlowerMarket() : total_trades(0), total_volume(0.0), parallel_operations(0), concurrent_trades(0) {}
@@ -451,19 +495,26 @@ public:
 
         double cost = actual_quantity * seller.price[flower];
 
-        // Execute atomic updates
+        // Execute atomic updates - using helper methods for doubles
         buyer.demand[flower].fetch_sub(actual_quantity);
-        buyer.budget.fetch_sub(cost);
-        buyer.spent.fetch_add(cost);
+        if (!buyer.subtractBudget(cost))
+        {
+            // Budget insufficient, rollback
+            buyer.demand[flower].fetch_add(actual_quantity);
+            omp_unset_lock(&sellers[seller_idx].lock);
+            omp_unset_lock(&buyers[buyer_idx].lock);
+            return false;
+        }
+        buyer.addSpent(cost);
         buyer.purchases_count.fetch_add(1);
 
         seller.quantity[flower].fetch_sub(actual_quantity);
-        seller.revenue.fetch_add(cost);
+        seller.addRevenue(cost);
         seller.trades_count.fetch_add(1);
 
         // Update global statistics
         total_trades.fetch_add(1);
-        total_volume.fetch_add(cost);
+        addToTotalVolume(cost);
         concurrent_trades.fetch_add(1);
 
         // Record trade
