@@ -57,6 +57,8 @@ int main(int argc, char **argv)
             {"Bob", {20, 20, 10}, {2.5, 2.8, 3.5}},
             {"Charlie", {10, 5, 10}, {1.8, 2.5, 4.2}}};
 
+        double start_time = MPI_Wtime();
+
         for (int round = 1; round <= NUM_ROUNDS; ++round)
         {
             std::cout << "\n🔁 ROUND " << round << " STARTS 🔁\n";
@@ -129,6 +131,9 @@ int main(int argc, char **argv)
             for (int i = 0; i < 3; ++i)
                 std::cout << s.quantity[i] << " " << FlowerNames[i] << (i < 2 ? ", " : "\n");
         }
+
+        double end_time = MPI_Wtime(); // <<<<<< End timer
+        std::cout << "\n🕒 Total Simulation Time: " << (end_time - start_time) << " seconds\n";
     }
     else
     {
