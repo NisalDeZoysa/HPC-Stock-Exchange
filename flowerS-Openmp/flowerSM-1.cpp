@@ -468,24 +468,3 @@ int main()
 
     return 0;
 }
-
-/*
-Key Features Added:
-
-1. **Priority System**: Buyers have priority levels (Dan=3, Fay=2, Eve=1)
-2. **Timestamp Tracking**: All sellers and buyers have timestamps
-3. **Trade History**: Complete record of all transactions
-4. **Original vs Current Tracking**: Shows progress of demands/inventory
-5. **Market Analytics**: Efficiency analysis, fulfillment rates
-6. **Better Conflict Resolution**: Priority-based allocation when stock is limited
-7. **Enhanced Reporting**: Detailed status and final reports
-8. **Market Summary**: Initial supply/demand analysis
-9. **Thread Safety**: Proper mutex protection for critical sections
-10. **Improved UI**: Better formatting with emojis and clear sections
-
-The system now handles conflicts much better:
-- Higher priority buyers get served first
-- When stock is limited, it's allocated fairly based on priority
-- No more race conditions from the original code
-- Complete audit trail of all trades
-*/
