@@ -30,6 +30,15 @@ struct Buyer
     double buy_price[3];
 };
 
+struct Trade
+{
+    int buyer_id;
+    int flower_type;
+    int seller_id;
+    int quantity;
+    double total_cost;
+};
+
 bool demandsLeft(const Buyer &buyer)
 {
     for (int i = 0; i < 3; ++i)
@@ -47,6 +56,16 @@ int main(int argc, char **argv)
     MPI_Comm_rank(MPI_COMM_WORLD, &rank);
     MPI_Comm_size(MPI_COMM_WORLD, &size);
 
+    if (size < 2)
+    {
+        if (rank == 0)
+        {
+            std::cout << "Need at least 2 processes (1 manager + 1 worker)\n";
+        }
+        MPI_Finalize();
+        return 1;
+    }
+
     std::vector<Seller> sellers;
 
     // Master list of 23 buyers
@@ -61,8 +80,12 @@ int main(int argc, char **argv)
             {"Bob", {100, 100, 100}, {5.5, 5.2, 6.5}},
             {"Charlie", {100, 100, 100}, {6.8, 5.0, 7.5}}};
     }
+    else
+    {
+        sellers.resize(3); // Initialize for worker processes
+    }
 
-    // Distribute buyers across processes except rank 0 (manager)
+    // Distribute buyers across worker processes (rank 0 is manager)
     std::vector<Buyer> myBuyers;
     if (rank != 0)
     {
@@ -70,126 +93,140 @@ int main(int argc, char **argv)
         {
             myBuyers.push_back(allBuyers[i]);
         }
+        std::cout << "[Rank " << rank << "] Assigned " << myBuyers.size() << " buyers\n";
     }
 
     bool global_done = false;
     int round = 0;
+    const int MAX_ROUNDS = 50; // Prevent infinite loops
 
-    while (!global_done)
+    while (!global_done && round < MAX_ROUNDS)
     {
         round++;
+        std::cout << "[Rank " << rank << "] Starting round " << round << "\n";
 
-        // Step 1: Broadcast sellers from manager to all other ranks
-        if (rank == 0)
+        // Step 1: Broadcast sellers from manager to all workers
+        for (int i = 0; i < 3; ++i)
         {
-            for (int i = 1; i < size; ++i)
-                MPI_Send(sellers.data(), sellers.size() * sizeof(Seller), MPI_BYTE, i, 0, MPI_COMM_WORLD);
-        }
-        else
-        {
-            sellers.resize(3);
-            MPI_Recv(sellers.data(), sellers.size() * sizeof(Seller), MPI_BYTE, 0, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+            MPI_Bcast(&sellers[i], sizeof(Seller), MPI_BYTE, 0, MPI_COMM_WORLD);
         }
 
-        // Step 2: Each buyer tries to buy flowers from sellers
-        std::vector<std::vector<int>> tradeQty(myBuyers.size(), std::vector<int>(3, 0));
-        std::vector<std::vector<int>> sellerIdx(myBuyers.size(), std::vector<int>(3, -1));
+        // Step 2: Workers process their buyers
+        std::vector<Trade> trades;
 
-// Process buyers in parallel but handle trades sequentially per buyer
-#pragma omp parallel for
-        for (int b = 0; b < (int)myBuyers.size(); ++b)
+        if (rank != 0)
         {
-            for (int f = 0; f < 3; ++f)
+// Use OpenMP to parallelize buyer processing
+#pragma omp parallel
             {
-                if (myBuyers[b].demand[f] > 0)
+                std::vector<Trade> local_trades;
+
+#pragma omp for
+                for (int b = 0; b < (int)myBuyers.size(); ++b)
                 {
-                    // Find best seller for this flower type
-                    int best_seller = -1;
-                    double best_price = 999999.0;
-
-                    for (int i = 0; i < (int)sellers.size(); ++i)
+                    for (int f = 0; f < 3; ++f)
                     {
-                        if (sellers[i].quantity[f] > 0 &&
-                            sellers[i].price[f] <= myBuyers[b].buy_price[f] &&
-                            sellers[i].price[f] < best_price)
+                        if (myBuyers[b].demand[f] > 0)
                         {
-                            best_seller = i;
-                            best_price = sellers[i].price[f];
-                        }
-                    }
+                            // Find best seller for this flower type
+                            int best_seller = -1;
+                            double best_price = 999999.0;
 
-                    if (best_seller >= 0)
-                    {
-                        Buyer &buyer = myBuyers[b];
-                        Seller &seller = sellers[best_seller];
-
-                        int max_affordable = (int)(buyer.budget / seller.price[f]);
-                        int qty = std::min({seller.quantity[f], buyer.demand[f], max_affordable});
-
-                        if (qty > 0)
-                        {
-                            double cost = qty * seller.price[f];
-                            buyer.demand[f] -= qty;
-                            buyer.budget -= cost;
-                            tradeQty[b][f] = qty;
-                            sellerIdx[b][f] = best_seller;
-
-#pragma omp critical
+                            for (int s = 0; s < 3; ++s)
                             {
-                                std::cout << "[Rank " << rank << "] " << buyer.name
-                                          << " wants " << qty << " " << FlowerNames[f]
-                                          << "(s) from " << seller.name << " for $" << cost << "\n";
+                                if (sellers[s].quantity[f] > 0 &&
+                                    sellers[s].price[f] <= myBuyers[b].buy_price[f] &&
+                                    sellers[s].price[f] < best_price)
+                                {
+                                    best_seller = s;
+                                    best_price = sellers[s].price[f];
+                                }
+                            }
+
+                            if (best_seller >= 0)
+                            {
+                                int max_affordable = (int)(myBuyers[b].budget / sellers[best_seller].price[f]);
+                                int qty = std::min({sellers[best_seller].quantity[f],
+                                                    myBuyers[b].demand[f],
+                                                    max_affordable});
+
+                                if (qty > 0)
+                                {
+                                    double cost = qty * sellers[best_seller].price[f];
+
+                                    // Create trade record
+                                    Trade trade;
+                                    trade.buyer_id = b;
+                                    trade.flower_type = f;
+                                    trade.seller_id = best_seller;
+                                    trade.quantity = qty;
+                                    trade.total_cost = cost;
+                                    local_trades.push_back(trade);
+
+                                    // Update buyer locally
+                                    myBuyers[b].demand[f] -= qty;
+                                    myBuyers[b].budget -= cost;
+                                }
                             }
                         }
                     }
                 }
+
+#pragma omp critical
+                {
+                    trades.insert(trades.end(), local_trades.begin(), local_trades.end());
+                }
+            }
+
+            // Print trades for this rank
+            for (const auto &trade : trades)
+            {
+                std::cout << "[Rank " << rank << "] " << myBuyers[trade.buyer_id].name
+                          << " wants " << trade.quantity << " " << FlowerNames[trade.flower_type]
+                          << "(s) from " << sellers[trade.seller_id].name
+                          << " for $" << trade.total_cost << "\n";
             }
         }
 
-        // Step 3: Send buyer trades to manager
+        // Step 3: Send trades to manager
         if (rank != 0)
         {
-            // First send the number of buyers this rank has
-            int num_buyers = (int)myBuyers.size();
-            MPI_Send(&num_buyers, 1, MPI_INT, 0, 99, MPI_COMM_WORLD);
+            int num_trades = trades.size();
+            MPI_Send(&num_trades, 1, MPI_INT, 0, 100, MPI_COMM_WORLD);
 
-            // Then send each buyer's trades
-            for (int b = 0; b < num_buyers; ++b)
+            if (num_trades > 0)
             {
-                MPI_Send(tradeQty[b].data(), 3, MPI_INT, 0, 1, MPI_COMM_WORLD);
-                MPI_Send(sellerIdx[b].data(), 3, MPI_INT, 0, 2, MPI_COMM_WORLD);
+                MPI_Send(trades.data(), num_trades * sizeof(Trade), MPI_BYTE, 0, 101, MPI_COMM_WORLD);
             }
         }
 
-        // Step 4: Manager receives trades and updates sellers
+        // Step 4: Manager receives and processes trades
         if (rank == 0)
         {
             for (int r = 1; r < size; ++r)
             {
-                // Receive number of buyers from this rank
-                int num_buyers;
-                MPI_Recv(&num_buyers, 1, MPI_INT, r, 99, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                int num_trades;
+                MPI_Recv(&num_trades, 1, MPI_INT, r, 100, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                // Receive trades from each buyer
-                for (int b = 0; b < num_buyers; ++b)
+                if (num_trades > 0)
                 {
-                    std::vector<int> q(3), s(3);
-                    MPI_Recv(q.data(), 3, MPI_INT, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
-                    MPI_Recv(s.data(), 3, MPI_INT, r, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+                    std::vector<Trade> received_trades(num_trades);
+                    MPI_Recv(received_trades.data(), num_trades * sizeof(Trade), MPI_BYTE, r, 101, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-                    for (int f = 0; f < 3; ++f)
+                    // Process trades
+                    for (const auto &trade : received_trades)
                     {
-                        if (s[f] >= 0 && s[f] < (int)sellers.size())
+                        if (trade.seller_id >= 0 && trade.seller_id < 3)
                         {
-                            sellers[s[f]].quantity[f] -= q[f];
-                            if (sellers[s[f]].quantity[f] < 0)
-                                sellers[s[f]].quantity[f] = 0;
+                            sellers[trade.seller_id].quantity[trade.flower_type] -= trade.quantity;
+                            if (sellers[trade.seller_id].quantity[trade.flower_type] < 0)
+                                sellers[trade.seller_id].quantity[trade.flower_type] = 0;
                         }
                     }
                 }
             }
 
-            // Step 4b: Decrease prices for unsold flowers
+            // Decrease prices for unsold flowers
             for (auto &seller : sellers)
             {
                 for (int f = 0; f < 3; ++f)
@@ -200,40 +237,60 @@ int main(int argc, char **argv)
             }
 
             std::cout << "\n--- Round " << round << " completed ---\n";
-        }
-
-        // Step 5: Check if all buyers are done
-        int local_done = 1; // assume done
-        for (auto &b : myBuyers)
-        {
-            if (demandsLeft(b))
+            std::cout << "[Manager] Current seller stocks:\n";
+            for (auto &s : sellers)
             {
-                local_done = 0;
-                break;
+                std::cout << s.name << ": ";
+                for (int f = 0; f < 3; ++f)
+                    std::cout << FlowerNames[f] << "=" << s.quantity[f] << " ";
+                std::cout << "\n";
             }
         }
 
-        MPI_Allreduce(&local_done, &global_done, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        // Step 5: Check if all buyers are done
+        int local_done = 1;
+        if (rank != 0)
+        {
+            for (const auto &b : myBuyers)
+            {
+                if (demandsLeft(b))
+                {
+                    local_done = 0;
+                    break;
+                }
+            }
+        }
 
-        // Optional: small delay to slow down rounds
-        std::this_thread::sleep_for(std::chrono::milliseconds(200));
+        // Synchronize all processes before collective operation
+        MPI_Barrier(MPI_COMM_WORLD);
+
+        int global_done_int;
+        MPI_Allreduce(&local_done, &global_done_int, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
+        global_done = (global_done_int == 1);
+
+        std::cout << "[Rank " << rank << "] Round " << round << " - Local done: " << local_done << ", Global done: " << global_done << "\n";
+
+        // Small delay to prevent overwhelming output
+        std::this_thread::sleep_for(std::chrono::milliseconds(100));
     }
 
     double end_time = MPI_Wtime();
 
+    // Final status
     if (rank != 0)
     {
-        for (auto &b : myBuyers)
+        for (const auto &b : myBuyers)
         {
             std::cout << "[Rank " << rank << "] ✅ " << b.name
-                      << " finished with $" << b.budget << " left\n";
+                      << " finished with $" << b.budget << " left, demands: "
+                      << b.demand[0] << "/" << b.demand[1] << "/" << b.demand[2] << "\n";
         }
     }
 
     if (rank == 0)
     {
         std::cout << "\n📊 Final Seller Stocks:\n";
-        for (auto &s : sellers)
+        for (const auto &s : sellers)
         {
             std::cout << s.name << ": ";
             for (int f = 0; f < 3; ++f)
@@ -241,6 +298,7 @@ int main(int argc, char **argv)
             std::cout << "\n";
         }
         std::cout << "\n⏱️ Total Time: " << end_time - start_time << " seconds\n";
+        std::cout << "Total rounds: " << round << "\n";
     }
 
     MPI_Finalize();
