@@ -83,7 +83,6 @@ int main(int argc, char **argv)
         return 0;
     }
 
-    // Data for all buyers
     std::vector<Order> buyerStates = {
         {{10, 5, 2}, 500, {4.0, 4.0, 5.0}},
         {{5, 5, 0}, 300, {3.5, 3.5, 0.0}},
@@ -113,9 +112,12 @@ int main(int argc, char **argv)
         "Dan", "Eve", "Fay", "Ben", "Lia", "Joe", "Sue", "Amy", "Tim", "Sam",
         "Jill", "Zoe", "Max", "Ivy", "Leo", "Kim", "Tom", "Nina", "Ray", "Liv", "Oli", "Ken", "Ana"};
 
+    double start_time = 0.0, end_time = 0.0;
+
     if (rank == 0)
     {
         start_time = MPI_Wtime();
+
         std::vector<Seller> sellers = {
             {"Alice", {100, 100, 100}, {6.0, 5.5, 7.0}},
             {"Bob", {100, 100, 100}, {5.5, 5.2, 6.5}},
@@ -132,12 +134,10 @@ int main(int argc, char **argv)
             std::cout << "\n--- Round " << round << " ---\n";
             bool any_trade = false;
 
-            // Receive orders
             std::vector<Order> currentOrders(numBuyers);
             for (int b = 1; b <= numBuyers; ++b)
                 MPI_Recv(&currentOrders[b - 1], sizeof(Order), MPI_BYTE, b, 0, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
 
-            // Process orders
             std::vector<TradeResult> results(numBuyers);
 
             for (int b = 0; b < numBuyers; ++b)
@@ -175,28 +175,34 @@ int main(int argc, char **argv)
                             seller.quantity[f] -= bought;
                             order.demand[f] -= bought;
                             any_trade = true;
+
+                            std::cout << buyerNames[b] << " bought " << bought << " " << FlowerNames[f]
+                                      << " from " << seller.name << " at $" << seller.price[f] << "\n";
                         }
                     }
+
                     result.fulfilled[f] = bought;
                 }
 
                 result.remaining_budget = order.budget;
-                buyerStates[b] = order; // Update buyer state for status
+                buyerStates[b] = order;
             }
 
-            // Send results
             for (int b = 1; b <= numBuyers; ++b)
                 MPI_Send(&results[b - 1], sizeof(TradeResult), MPI_BYTE, b, 1, MPI_COMM_WORLD);
 
-            // Price drops
-            for (auto &s : sellers)
-                for (int f = 0; f < 3; ++f)
-                    if (s.price[f] > 0.2)
-                        s.price[f] -= 0.2;
+            if (!any_trade)
+            {
+                for (auto &s : sellers)
+                    for (int f = 0; f < 3; ++f)
+                        if (s.price[f] > 0.2)
+                            s.price[f] -= 0.2;
+
+                std::cout << "⚠️ No trades occurred. Prices dropped.\n";
+            }
 
             printStatus(sellers, buyerStates, buyerNames);
 
-            // Check termination
             bool allBuyersDone = true;
             for (const auto &b : buyerStates)
                 for (int f = 0; f < 3; ++f)
@@ -205,21 +211,14 @@ int main(int argc, char **argv)
 
             marketOpen = !(allBuyersDone || allSellersOut(sellers));
 
-            // Inform all buyers
             for (int b = 1; b <= numBuyers; ++b)
                 MPI_Send(&marketOpen, 1, MPI_CXX_BOOL, b, 2, MPI_COMM_WORLD);
-
-            if (!any_trade)
-            {
-                std::cout << "⚠️ No trades occurred. Prices dropped.\n";
-            }
 
             std::this_thread::sleep_for(std::chrono::seconds(1));
         }
 
         end_time = MPI_Wtime();
         std::cout << "\nTotal simulation time: " << (end_time - start_time) << " seconds.\n";
-
         std::cout << "\n✅ Market closed after " << round << " rounds.\n";
     }
     else
