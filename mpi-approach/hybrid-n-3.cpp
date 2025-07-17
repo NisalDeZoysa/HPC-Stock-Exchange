@@ -38,15 +38,6 @@ bool demandsLeft(const Buyer &buyer)
     return false;
 }
 
-// Calculate number of buyers assigned to a process
-int buyersPerProc(int rank, int size, int totalBuyers)
-{
-    int count = 0;
-    for (size_t i = rank - 1; i < (size_t)totalBuyers; i += (size - 1))
-        count++;
-    return count;
-}
-
 int main(int argc, char **argv)
 {
     MPI_Init(&argc, &argv);
@@ -104,31 +95,47 @@ int main(int argc, char **argv)
         std::vector<std::vector<int>> tradeQty(myBuyers.size(), std::vector<int>(3, 0));
         std::vector<std::vector<int>> sellerIdx(myBuyers.size(), std::vector<int>(3, -1));
 
-#pragma omp parallel for collapse(2)
+// Process buyers in parallel but handle trades sequentially per buyer
+#pragma omp parallel for
         for (int b = 0; b < (int)myBuyers.size(); ++b)
         {
             for (int f = 0; f < 3; ++f)
             {
-                for (int i = 0; i < (int)sellers.size(); ++i)
+                if (myBuyers[b].demand[f] > 0)
                 {
-#pragma omp critical
+                    // Find best seller for this flower type
+                    int best_seller = -1;
+                    double best_price = 999999.0;
+
+                    for (int i = 0; i < (int)sellers.size(); ++i)
+                    {
+                        if (sellers[i].quantity[f] > 0 &&
+                            sellers[i].price[f] <= myBuyers[b].buy_price[f] &&
+                            sellers[i].price[f] < best_price)
+                        {
+                            best_seller = i;
+                            best_price = sellers[i].price[f];
+                        }
+                    }
+
+                    if (best_seller >= 0)
                     {
                         Buyer &buyer = myBuyers[b];
-                        Seller &seller = sellers[i];
-                        if (buyer.demand[f] > 0 &&
-                            seller.quantity[f] > 0 &&
-                            seller.price[f] <= buyer.buy_price[f] &&
-                            buyer.budget >= seller.price[f])
+                        Seller &seller = sellers[best_seller];
+
+                        int max_affordable = (int)(buyer.budget / seller.price[f]);
+                        int qty = std::min({seller.quantity[f], buyer.demand[f], max_affordable});
+
+                        if (qty > 0)
                         {
-                            int max_affordable = buyer.budget / seller.price[f];
-                            int qty = std::min({seller.quantity[f], buyer.demand[f], max_affordable});
-                            if (qty > 0)
+                            double cost = qty * seller.price[f];
+                            buyer.demand[f] -= qty;
+                            buyer.budget -= cost;
+                            tradeQty[b][f] = qty;
+                            sellerIdx[b][f] = best_seller;
+
+#pragma omp critical
                             {
-                                double cost = qty * seller.price[f];
-                                buyer.demand[f] -= qty;
-                                buyer.budget -= cost;
-                                tradeQty[b][f] = qty;
-                                sellerIdx[b][f] = i;
                                 std::cout << "[Rank " << rank << "] " << buyer.name
                                           << " wants " << qty << " " << FlowerNames[f]
                                           << "(s) from " << seller.name << " for $" << cost << "\n";
@@ -142,7 +149,12 @@ int main(int argc, char **argv)
         // Step 3: Send buyer trades to manager
         if (rank != 0)
         {
-            for (int b = 0; b < (int)myBuyers.size(); ++b)
+            // First send the number of buyers this rank has
+            int num_buyers = (int)myBuyers.size();
+            MPI_Send(&num_buyers, 1, MPI_INT, 0, 99, MPI_COMM_WORLD);
+
+            // Then send each buyer's trades
+            for (int b = 0; b < num_buyers; ++b)
             {
                 MPI_Send(tradeQty[b].data(), 3, MPI_INT, 0, 1, MPI_COMM_WORLD);
                 MPI_Send(sellerIdx[b].data(), 3, MPI_INT, 0, 2, MPI_COMM_WORLD);
@@ -154,15 +166,20 @@ int main(int argc, char **argv)
         {
             for (int r = 1; r < size; ++r)
             {
-                int count = buyersPerProc(r, size, (int)allBuyers.size());
-                for (int b = 0; b < count; ++b)
+                // Receive number of buyers from this rank
+                int num_buyers;
+                MPI_Recv(&num_buyers, 1, MPI_INT, r, 99, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
+                // Receive trades from each buyer
+                for (int b = 0; b < num_buyers; ++b)
                 {
                     std::vector<int> q(3), s(3);
                     MPI_Recv(q.data(), 3, MPI_INT, r, 1, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
                     MPI_Recv(s.data(), 3, MPI_INT, r, 2, MPI_COMM_WORLD, MPI_STATUS_IGNORE);
+
                     for (int f = 0; f < 3; ++f)
                     {
-                        if (s[f] >= 0)
+                        if (s[f] >= 0 && s[f] < (int)sellers.size())
                         {
                             sellers[s[f]].quantity[f] -= q[f];
                             if (sellers[s[f]].quantity[f] < 0)
@@ -174,16 +191,27 @@ int main(int argc, char **argv)
 
             // Step 4b: Decrease prices for unsold flowers
             for (auto &seller : sellers)
+            {
                 for (int f = 0; f < 3; ++f)
+                {
                     if (seller.price[f] > 0.2)
                         seller.price[f] -= 0.2;
+                }
+            }
+
+            std::cout << "\n--- Round " << round << " completed ---\n";
         }
 
         // Step 5: Check if all buyers are done
         int local_done = 1; // assume done
         for (auto &b : myBuyers)
+        {
             if (demandsLeft(b))
+            {
                 local_done = 0;
+                break;
+            }
+        }
 
         MPI_Allreduce(&local_done, &global_done, 1, MPI_INT, MPI_LAND, MPI_COMM_WORLD);
 
